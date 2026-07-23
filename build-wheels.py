@@ -4,7 +4,7 @@ from pathlib import Path
 
 REPO      = Path(__file__).resolve().parent
 IMAGE     = os.environ.get("WHEEL_BUILDER_IMAGE", "root-wheel-builder:manylinux_2_28")
-VARIANTS  = os.environ.get("WHEEL_VARIANTS",      "max").split()
+VARIANTS  = os.environ.get("WHEEL_VARIANTS",      "max core dataframe").split()
 BUILDS    = [ "cp313-manylinux_x86_64" ]
 CACHE     = Path(os.environ.get("WHEEL_CACHE_ROOT", REPO / ".wheel-cache"))
 OUT       = Path(os.environ.get("OUTPUT_DIR",       REPO / "wheelhouse"))
