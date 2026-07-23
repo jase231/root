@@ -1,9 +1,9 @@
 [build-system]
-requires = ["scikit-build-core>=0.10"]
+requires = ["scikit-build-core>=0.10", "ninja"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "root"
+name = "root-roofit"
 version = "0.1a14"
 requires-python = ">=3.10"
 maintainers = [
@@ -19,8 +19,8 @@ dependencies = [
 # Point backend to python packages and to explicitly use Ninja
 [tool.scikit-build]
 wheel.packages = [
-	"bindings/pyroot/pythonizations/python/ROOT",
-	"bindings/pyroot/cppyy/cppyy/python/cppyy",
+	"../../bindings/pyroot/pythonizations/python/ROOT",
+	"../../bindings/pyroot/cppyy/cppyy/python/cppyy",
 ]
 cmake.args = [
 	"-GNinja", 
@@ -66,12 +66,12 @@ builtin_lzma="ON"
 builtin_zstd="ON"
 builtin_xxhash="ON"
 pyroot="ON"
-dataframe="ON"
-xrootd="ON"
+dataframe="OFF"
+xrootd="OFF"
 ssl="ON"
-imt="ON"
+imt="OFF"
 roofit="ON"
-mathmore="ON"
+mathmore="OFF"
 
 # Expose the ROOT cli as an executable command via _rootcli wrapper 
 [project.scripts]
