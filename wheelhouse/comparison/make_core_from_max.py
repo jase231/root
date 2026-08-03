@@ -6,12 +6,17 @@ Derive a variety wheel tree from an already-built `root_max` wheel tree.
   1. Reads the original core RECORD purely as a manifest (which paths to ship).
   2. Copies each manifest payload file out of the max tree.
   3. Maps `<core>.libs/...` manifest entries onto max's `<max>.libs/...` files
-     and keeps them under the max name (RPATHs already point there).
+     and keeps them under the max name (RPATHs already point there), for the
+     core variety only (see --bundled-libs).
   4. Regenerates the .dist-info from max's, renaming the directory, patching
      `Name:` in METADATA, patching the identity fields in the SBOM, copying
-     WHEEL / entry_points / licenses verbatim, and writing a fresh RECORD.
+     WHEEL / licenses verbatim, and writing a fresh RECORD.
   5. Preserves ROOT.modulemap from the build-option based wheel
   6. Drops modules.idx
+  7. Ships entry_points.txt only for the core variety, so the generated
+     console-script launcher has exactly one owner (see --console-scripts).
+  8. Declares the dependency on core in every split's METADATA, which max's
+     copied metadata does not carry (see --requires-core).
 """
 import argparse
 import base64
@@ -24,6 +29,10 @@ from pathlib import Path
 
 DISTINFO_RE = re.compile(r"^[^/]+\.dist-info/")
 LIBS_RE = re.compile(r"^[^/]+\.libs/")
+REQUIRES_DIST_RE = re.compile(r"^Requires-Dist:\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+CORE_DIST = "root_core"
+CORE_HY = CORE_DIST.replace("_", "-")
 
 
 def die(msg):
@@ -48,6 +57,27 @@ def find_single(dirpath: Path, suffix: str):
     return hits[0]
 
 
+def normalize_dist_name(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def inject_requires_dist(text, requirement, dist_name):
+    head, sep, body = text.partition("\n\n")   # blank line ends the header block
+    lines = head.splitlines()
+
+    last = -1
+    for i, line in enumerate(lines):
+        m = REQUIRES_DIST_RE.match(line)
+        if not m:
+            continue
+        if normalize_dist_name(m.group(1)) == normalize_dist_name(dist_name):
+            return text, False
+        last = i
+
+    lines.insert(last + 1 if last >= 0 else len(lines), f"Requires-Dist: {requirement}")
+    return "\n".join(lines) + (sep + body if sep else "\n"), True
+
+
 def parse_manifest_paths(record_path: Path):
     """Yield the relative path of each RECORD entry (first CSV field)."""
     with open(record_path, encoding="utf-8") as f:
@@ -68,6 +98,22 @@ def main():
     ap.add_argument("--new-name", help="distribution name (underscore form) for the result")
     ap.add_argument("--force", action="store_true",
                     help="overwrite --out if it already exists")
+    ap.add_argument("--console-scripts", action=argparse.BooleanOptionalAction, default=None,
+                    help="ship max's entry_points.txt in the result. Defaults to on only "
+                         f"for --new-name {CORE_DIST}: the launcher it generates lives at a "
+                         "shared path, so a second owner means uninstalling that variety "
+                         "deletes the launcher the others still need")
+    ap.add_argument("--bundled-libs", action=argparse.BooleanOptionalAction, default=None,
+                    help="ship the auditwheel-bundled system libraries in the result. "
+                         f"Defaults to on only for --new-name {CORE_DIST}: every variety "
+                         "remaps them onto max's single .libs directory, so a second owner "
+                         "means uninstalling that variety deletes libraries the others "
+                         "still link against")
+    ap.add_argument("--requires-core", action=argparse.BooleanOptionalAction, default=None,
+                    help=f"declare `Requires-Dist: {CORE_HY}==<version>` in the result's "
+                         "METADATA, pinned because the varieties are byte-derived from one "
+                         f"max build. Defaults to on for everything except --new-name "
+                         f"{CORE_DIST}, which cannot depend on itself")
     args = ap.parse_args()
 
     src = Path(args.src).resolve()
@@ -96,15 +142,28 @@ def main():
     new_hy = new_us.replace("_", "-")                      # root-core
     new_distinfo = f"{new_us}-{version}.dist-info"
 
+    is_core = new_us == CORE_DIST
+    keep_entry_points = is_core if args.console_scripts is None else args.console_scripts
+    keep_bundled_libs = is_core if args.bundled_libs is None else args.bundled_libs
+    requires_core = (not is_core) if args.requires_core is None else args.requires_core
+    if requires_core and is_core:
+        die(f"--requires-core would make {CORE_HY} depend on itself")
+    core_requirement = f"{CORE_HY}=={version}"
+
     print(f"source wheel : {old_us} {version}   ({src})")
     print(f"target wheel : {new_us} {version}   ({out})")
-    print(f"bundled libs : keeping '{src_libs}' (RPATHs already point there)")
+    if keep_bundled_libs:
+        print(f"bundled libs : keeping '{src_libs}' (RPATHs already point there)")
+    else:
+        print(f"bundled libs : dropped ({CORE_DIST} owns '{src_libs}')")
+    print(f"entry points : {'shipped' if keep_entry_points else 'dropped'}")
+    print(f"requires     : {core_requirement if requires_core else '(nothing added)'}")
     print()
 
     out.mkdir(parents=True)
 
     # copy files listed in core's RECORD manifest out of max and into new dir
-    n_payload = n_libs = 0
+    n_payload = n_libs = n_libs_dropped = 0
     missing = []
     for rel in parse_manifest_paths(manifest):
         if DISTINFO_RE.match(rel):
@@ -112,15 +171,20 @@ def main():
         elif "modules.idx" in rel:
             continue  # drop the modules index; rebuilt at launch
         elif LIBS_RE.match(rel):
+            if not keep_bundled_libs:
+                n_libs_dropped += 1
+                continue  # core ships these; co-owning them breaks its loader on uninstall
             # keep max's .libs to avoid patchelfing new rpaths
             tail = rel.split("/", 1)[1]
             source = src / src_libs / tail
             dest = out / src_libs / tail
             n_libs += 1
-        elif "ROOT.modulemap" in rel:
+        elif "ROOT.modulemap" in rel and args.modulemap:
             source = args.modulemap
             dest = out / rel
             n_payload += 1
+        elif "ROOT.modulemap" in rel:
+            continue # drop the modulemap if we don't explicitly provide a source for one
         else:
             source = src / rel
             dest = out / rel
@@ -140,7 +204,11 @@ def main():
             print(f"    ... and {len(missing) - 25} more", file=sys.stderr)
         die("aborting; the max tree does not contain every manifest file")
 
-    print(f"copied {n_payload} payload files + {n_libs} bundled-lib files")
+    if keep_bundled_libs:
+        print(f"copied {n_payload} payload files + {n_libs} bundled-lib files")
+    else:
+        print(f"copied {n_payload} payload files "
+              f"({n_libs_dropped} bundled-lib files dropped)")
 
     # path max's .dist-info to report new wheel's metadata correctly
     src_di = src / src_distinfo
@@ -163,8 +231,17 @@ def main():
                                   flags=re.MULTILINE)
             if n != 1:
                 die(f"did not find a 'Name: {old_hy}' line in METADATA to patch")
-            target.write_text(new_text, encoding="utf-8")
             print(f"METADATA     : Name: {old_hy} -> {new_hy}")
+            if requires_core:
+                new_text, added = inject_requires_dist(new_text, core_requirement, CORE_HY)
+                if added:
+                    print(f"METADATA     : + Requires-Dist: {core_requirement}")
+                else:
+                    print(f"METADATA     : Requires-Dist on {CORE_HY} already present, kept")
+            target.write_text(new_text, encoding="utf-8")
+        elif child.name == "entry_points.txt" and not keep_entry_points:
+            print(f"entry_points : dropped ({CORE_DIST} owns the console scripts)")
+            continue
         elif child.suffix == ".json" and "sbom" in child.parent.name:
             # SBOM identity fields (name / bom-ref / purl / file_name) all carry
             # the underscore form; bundled-system-lib refs never do.
@@ -174,7 +251,7 @@ def main():
             print(f"SBOM         : {child.name}: {old_us} -> {new_us} "
                   f"({text.count(old_us)} refs)")
         else:
-            shutil.copy2(child, target)  # WHEEL, entry_points.txt, licenses/* verbatim
+            shutil.copy2(child, target)  # WHEEL, licenses/*, entry_points.txt when kept
 
     # write a fresh RECORD covering the finished tree
     record_lines = []
