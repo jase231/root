@@ -289,6 +289,30 @@ function(ROOT_REPLACE_BUILD_INTERFACE include_dir_var include_dir)
 endfunction(ROOT_REPLACE_BUILD_INTERFACE)
 
 #---------------------------------------------------------------------------------------------------
+#---ROOT_IS_PCH_EXCLUDED( dir result_var )
+#
+# Set <result_var> to TRUE when the absolute source directory <dir> lies inside a
+# package listed in ROOT_PCH_EXCLUDE, i.e. a package whose headers are kept out
+# of etc/allDict.cxx.pch. Entries are matched as source-tree-relative path
+# prefixes on whole path components, the same way cmake/unix/makepchinput.py
+# matches them; keep the two in sync.
+#---------------------------------------------------------------------------------------------------
+function(ROOT_IS_PCH_EXCLUDED dir result_var)
+  set(${result_var} FALSE PARENT_SCOPE)
+  if(NOT ROOT_PCH_EXCLUDE)
+    return()
+  endif()
+  file(RELATIVE_PATH _rel "${CMAKE_SOURCE_DIR}" "${dir}")
+  foreach(_pattern ${ROOT_PCH_EXCLUDE})
+    string(REGEX REPLACE "/+$" "" _pattern "${_pattern}")
+    if(_rel STREQUAL "${_pattern}" OR _rel MATCHES "^${_pattern}/")
+      set(${result_var} TRUE PARENT_SCOPE)
+      return()
+    endif()
+  endforeach()
+endfunction(ROOT_IS_PCH_EXCLUDED)
+
+#---------------------------------------------------------------------------------------------------
 #---ROOT_GENERATE_DICTIONARY( dictionary headerfiles NODEPHEADERS ghdr1 ghdr2 ...
 #                                                    MODULE module DEPENDENCIES dep1 dep2
 #                                                    BUILTINS dep1 dep2
@@ -313,6 +337,22 @@ function(ROOT_GENERATE_DICTIONARY dictionary)
       endif()
     endforeach()
   endif(ARG_OPTIONS)
+
+  # -writeEmptyRootPCM tells rootcling that this package's headers live in the
+  # PCH, so it may omit the class->header map, the forward declarations, the
+  # payload code and the streamer infos. That is only true while the package
+  # really is in the PCH: for a package listed in ROOT_PCH_EXCLUDE it would leave
+  # the classes unreachable at runtime. Drop the flag there so the dictionary
+  # falls back to header parsing on demand, which is self-contained.
+  if(ARG_OPTIONS AND ROOT_PCH_EXCLUDE)
+    ROOT_IS_PCH_EXCLUDED("${CMAKE_CURRENT_SOURCE_DIR}" _pch_excluded)
+    if(_pch_excluded AND "-writeEmptyRootPCM" IN_LIST ARG_OPTIONS)
+      list(REMOVE_ITEM ARG_OPTIONS "-writeEmptyRootPCM")
+      message(STATUS
+        "Dictionary ${dictionary}: dropping -writeEmptyRootPCM "
+        "(package excluded from the PCH via ROOT_PCH_EXCLUDE)")
+    endif()
+  endif()
 
   #---roottest compability---------------------------------
   if(CMAKE_ROOTTEST_DICT)

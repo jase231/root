@@ -1,9 +1,9 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "ninja"]
+requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "root-core"
+name = "root-minimal"
 version = "0.1a14"
 requires-python = ">=3.10"
 maintainers = [
@@ -44,8 +44,12 @@ CMAKE_INSTALL_TUTDIR = "ROOT/tutorials"
 gminimal="ON"
 asimage="ON"
 opengl="OFF"
-runtime_cxxmodules="ON"
+runtime_cxxmodules="OFF"
 fail-on-missing="ON"
+
+# root-core is the variety that ships etc/allDict.cxx.pch, so everything it
+# builds lives in the PCH, i.e. nothing to exlude
+ROOT_PCH_EXCLUDE=""
 
 # Explicitly list components that gminimal implicitly turns off as documentation
 # tmva-pymva and tpython are disabled for manylinux compatibility

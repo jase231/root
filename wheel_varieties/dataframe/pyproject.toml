@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "ninja"]
+requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -44,8 +44,10 @@ CMAKE_INSTALL_TUTDIR = "ROOT/tutorials"
 gminimal="ON"
 asimage="ON"
 opengl="OFF"
-runtime_cxxmodules="ON"
+runtime_cxxmodules="OFF"
 fail-on-missing="ON"
+
+ROOT_PCH_EXCLUDE="tree/dataframe;tree/ml"
 
 # Explicitly list components that gminimal implicitly turns off as documentation
 # tmva-pymva and tpython are disabled for manylinux compatibility
@@ -69,7 +71,7 @@ pyroot="ON"
 dataframe="ON"
 xrootd="OFF"
 ssl="ON"
-imt="OFF"
+imt="ON"
 roofit="OFF"
 mathmore="OFF"
 

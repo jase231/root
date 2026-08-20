@@ -5837,10 +5837,12 @@ namespace {
       bool VisitNamespaceDecl(NamespaceDecl* nsDecl) {
          // We want to enable the external lookup for this namespace
          // because it may shadow the lookup of other names contained
-         // in that namespace
-
-         nsDecl->setHasExternalVisibleStorage();
-         fNSSet.insert(nsDecl);
+         // in that namespace.
+         //
+         // Register the primary declaration, not the one we were handed.
+         auto *primary = cast<NamespaceDecl>(nsDecl->getPrimaryContext());
+         primary->setHasExternalVisibleStorage();
+         fNSSet.insert(primary);
          return true;
       }
       bool VisitClassTemplateSpecializationDecl(ClassTemplateSpecializationDecl* specDecl) {

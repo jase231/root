@@ -329,6 +329,35 @@ endif()
 #---Define at moment the options with the selected default values------------------------------
 ROOT_APPLY_OPTIONS()
 
+#---Packages deliberately kept out of etc/allDict.cxx.pch--------------------------------------
+# Semicolon-separated list of source-tree-relative directory prefixes (e.g.
+# "tree/dataframe;roofit") whose headers must NOT be baked into the PCH. It is
+# the single source of truth for two decisions that have to agree:
+#
+#   * cmake/unix/makepchinput.py skips these packages when collecting the PCH
+#     input, so their headers stay out of etc/allDict.cxx.pch;
+#   * ROOT_GENERATE_DICTIONARY() drops -writeEmptyRootPCM from their rootcling
+#     options, so their dictionaries carry a full header-parsing-on-demand
+#     payload (class->header map, forward declarations, payload code) and a real
+#     <lib>_rdict.pcm instead of assuming the PCH provides the declarations.
+#
+# Getting only one of the two would break the package: a dictionary built with
+# -writeEmptyRootPCM whose headers are absent from the PCH registers a TClass
+# init routine with no way to reach the declaration, and first use fails with
+# "no interpreter information for class <X> is available even though it has a
+# TClass initialization routine".
+#
+# Empty by default: a plain ROOT build behaves exactly as before.
+set(ROOT_PCH_EXCLUDE "" CACHE STRING
+    "Source-tree-relative directory prefixes to keep out of etc/allDict.cxx.pch")
+
+if(ROOT_PCH_EXCLUDE AND runtime_cxxmodules)
+  message(STATUS
+    "ROOT_PCH_EXCLUDE is only meaningful without runtime C++ modules "
+    "(no PCH is built with runtime_cxxmodules=ON); ignoring it.")
+  set(ROOT_PCH_EXCLUDE "")
+endif()
+
 #---roottest option implies testing
 if(roottest OR rootbench)
   set(testing ON CACHE BOOL "" FORCE)

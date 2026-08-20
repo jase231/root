@@ -17,6 +17,8 @@ Derive a variety wheel tree from an already-built `root_max` wheel tree.
      console-script launcher has exactly one owner (see --console-scripts).
   8. Declares the dependency on core in every split's METADATA, which max's
      copied metadata does not carry (see --requires-core).
+  9. Ships etc/allDict.cxx.pch only for the core variety, for the same
+     single-owner reason (see --pch).
 """
 import argparse
 import base64
@@ -33,6 +35,10 @@ REQUIRES_DIST_RE = re.compile(r"^Requires-Dist:\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 CORE_DIST = "root_core"
 CORE_HY = CORE_DIST.replace("_", "-")
+
+# The PCH of a runtime_cxxmodules=OFF build. Every variety's own build produces
+# one, so it appears in every manifest, but only core may ship it: see --pch.
+PCH_NAME = "allDict.cxx.pch"
 
 
 def die(msg):
@@ -109,6 +115,13 @@ def main():
                          "remaps them onto max's single .libs directory, so a second owner "
                          "means uninstalling that variety deletes libraries the others "
                          "still link against")
+    ap.add_argument("--pch", action=argparse.BooleanOptionalAction, default=None,
+                    help=f"ship etc/{PCH_NAME} in the result. Defaults to on only for "
+                         f"--new-name {CORE_DIST}: it sits at a single shared path and "
+                         "every variety's build produces one, so a second owner means "
+                         "uninstalling that variety deletes the PCH the others still "
+                         "need. Only meaningful for runtime_cxxmodules=OFF builds; a "
+                         "modules build has no PCH and the flag is then a no-op")
     ap.add_argument("--requires-core", action=argparse.BooleanOptionalAction, default=None,
                     help=f"declare `Requires-Dist: {CORE_HY}==<version>` in the result's "
                          "METADATA, pinned because the varieties are byte-derived from one "
@@ -145,6 +158,7 @@ def main():
     is_core = new_us == CORE_DIST
     keep_entry_points = is_core if args.console_scripts is None else args.console_scripts
     keep_bundled_libs = is_core if args.bundled_libs is None else args.bundled_libs
+    keep_pch = is_core if args.pch is None else args.pch
     requires_core = (not is_core) if args.requires_core is None else args.requires_core
     if requires_core and is_core:
         die(f"--requires-core would make {CORE_HY} depend on itself")
@@ -157,19 +171,30 @@ def main():
     else:
         print(f"bundled libs : dropped ({CORE_DIST} owns '{src_libs}')")
     print(f"entry points : {'shipped' if keep_entry_points else 'dropped'}")
+    if keep_pch:
+        print(f"pch          : shipping etc/{PCH_NAME} if the manifest lists one")
+    else:
+        print(f"pch          : dropped ({CORE_DIST} owns etc/{PCH_NAME})")
     print(f"requires     : {core_requirement if requires_core else '(nothing added)'}")
     print()
 
     out.mkdir(parents=True)
 
     # copy files listed in core's RECORD manifest out of max and into new dir
-    n_payload = n_libs = n_libs_dropped = 0
+    n_payload = n_libs = n_libs_dropped = n_pch = n_pch_dropped = 0
     missing = []
     for rel in parse_manifest_paths(manifest):
         if DISTINFO_RE.match(rel):
             continue  # dist-info is regenerated below
         elif "modules.idx" in rel:
             continue  # drop the modules index; rebuilt at launch
+        elif rel.endswith(PCH_NAME):
+            if not keep_pch:
+                n_pch_dropped += 1
+                continue  # core ships it; co-owning it breaks the others on uninstall
+            source = src / rel
+            dest = out / rel
+            n_pch += 1
         elif LIBS_RE.match(rel):
             if not keep_bundled_libs:
                 n_libs_dropped += 1
@@ -209,6 +234,15 @@ def main():
     else:
         print(f"copied {n_payload} payload files "
               f"({n_libs_dropped} bundled-lib files dropped)")
+
+    if n_pch:
+        print(f"pch          : copied etc/{PCH_NAME}")
+    elif n_pch_dropped:
+        print(f"pch          : {n_pch_dropped} PCH file(s) dropped")
+    elif not keep_pch:
+        # Nothing to drop. Either a modules build, or the PCH moved/was renamed --
+        # in which case it silently landed in the payload above and is co-owned.
+        print(f"pch          : note, no etc/{PCH_NAME} in the manifest, nothing dropped")
 
     # path max's .dist-info to report new wheel's metadata correctly
     src_di = src / src_distinfo

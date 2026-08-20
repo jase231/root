@@ -36,13 +36,23 @@ def removeLeftOvers(filesToRemove):
 def getParams():
    """
    Extract parameters from the commandline, which looks like
-   makePCHInput.py WWW XXX YYY ZZZ -- CXXFLAGS
+   makePCHInput.py WWW XXX YYY [--pch-exclude a,b] ZZZ -- CXXFLAGS
    """
-   argv = sys.argv
-   rootSrcDir, modules, legacyPyROOT = argv[1:4]
-   clingetpchList = argv[4:]
+   argv = sys.argv[1:]
 
-   return rootSrcDir, modules, legacyPyROOT == 'ON', clingetpchList
+   # Optional and comma-separated so that an empty ROOT_PCH_EXCLUDE simply omits
+   # the flag, leaving the positional layout untouched.
+   pchExclude = []
+   if "--pch-exclude" in argv:
+      idx = argv.index("--pch-exclude")
+      raw = argv[idx + 1].replace(";", ",")
+      pchExclude = [os.path.normpath(p) for p in raw.split(",") if p]
+      del argv[idx:idx + 2]
+
+   rootSrcDir, modules, legacyPyROOT = argv[0:3]
+   clingetpchList = argv[3:]
+
+   return rootSrcDir, modules, legacyPyROOT == 'ON', pchExclude, clingetpchList
 
 #-------------------------------------------------------------------------------
 def getGuardedStlInclude(headerName):
@@ -217,7 +227,21 @@ def isAnyPatternInString(patterns, theString):
 
 
 #-------------------------------------------------------------------------------
-def isDirForPCH(dirName, legacyPyROOT):
+def isPathPrefix(prefixes, dirName):
+    """
+    Check whether dirName is, or lies below, any of the given directory
+    prefixes. Matching is on whole path components, mirroring
+    ROOT_IS_PCH_EXCLUDED() in cmake/modules/RootMacros.cmake
+    """
+    dirName = os.path.normpath(dirName)
+    for prefix in prefixes:
+        if dirName == prefix or dirName.startswith(prefix + os.sep):
+            return True
+    return False
+
+
+#-------------------------------------------------------------------------------
+def isDirForPCH(dirName, legacyPyROOT, pchExclude=()):
    """
    Check if the directory corresponds to a module whose headers must belong to
    the PCH
@@ -257,7 +281,8 @@ def isDirForPCH(dirName, legacyPyROOT):
                           ]
 
    accepted = isAnyPatternInString(PCHPatternsWhitelist,dirName) and \
-               not isAnyPatternInString(PCHPatternsBlacklist,dirName)
+               not isAnyPatternInString(PCHPatternsBlacklist,dirName) and \
+               not isPathPrefix(pchExclude, dirName)
 
    return accepted
 
@@ -410,9 +435,14 @@ def writeFiles(contentFileNamePairs):
       writeToFile(content, filename)
 
 #-------------------------------------------------------------------------------
-def printModulesMessageOnScreen(selModules):
+def printModulesMessageOnScreen(selModules, pchExclude=()):
    modulesList = sorted(list(selModules))
    print ("\nGenerating PCH for %s\n" %" ".join(modulesList))
+   if pchExclude:
+      print ("Excluded from the PCH via ROOT_PCH_EXCLUDE: %s\n"
+             "Dictionaries under these paths are built without "
+             "-writeEmptyRootPCM and resolve through header parsing on demand.\n"
+             %" ".join(sorted(pchExclude)))
 
 #-------------------------------------------------------------------------------
 def getExtraHeaders():
@@ -444,7 +474,7 @@ def makePCHInput():
        * etc/dictpch/allHeaders.h
        * etc/dictpch/allCppflags.txt
     """
-    rootSrcDir, modules, legacyPyROOT, clingetpchList = getParams()
+    rootSrcDir, modules, legacyPyROOT, pchExclude, clingetpchList = getParams()
 
     outdir = os.path.join("etc", "dictpch")
     allHeadersFilename = os.path.join(outdir, "allHeaders.h")
@@ -471,7 +501,7 @@ def makePCHInput():
     allIncPathsList = []
     for dictName in dictNames:
         dirName = getDirName(dictName)
-        if not isDirForPCH(dirName, legacyPyROOT):
+        if not isDirForPCH(dirName, legacyPyROOT, pchExclude):
             continue
 
         selModules.add(dirName)
@@ -499,7 +529,7 @@ def makePCHInput():
         )
     )
 
-    printModulesMessageOnScreen(selModules)
+    printModulesMessageOnScreen(selModules, pchExclude)
 
 
 if __name__ == "__main__":

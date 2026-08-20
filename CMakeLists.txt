@@ -498,6 +498,17 @@ else()
   get_property(__pch_dependencies GLOBAL PROPERTY ROOT_PCH_DEPENDENCIES)
   get_property(__pch_dictionaries GLOBAL PROPERTY ROOT_PCH_DICTIONARIES)
 
+  # Keep the packages listed in ROOT_PCH_EXCLUDE out of the PCH. Their
+  # dictionaries were built without -writeEmptyRootPCM (see
+  # ROOT_GENERATE_DICTIONARY) so they resolve through header parsing on demand
+  # instead. Passed comma-separated and only when non-empty, so a default build
+  # invokes makepchinput.py exactly as before.
+  set(__pch_exclude_args)
+  if(ROOT_PCH_EXCLUDE)
+    string(REPLACE ";" "," __pch_exclude_csv "${ROOT_PCH_EXCLUDE}")
+    set(__pch_exclude_args --pch-exclude ${__pch_exclude_csv})
+  endif()
+
   add_custom_command(OUTPUT etc/allDict.cxx.pch
     BYPRODUCTS
       etc/dictpch/allCppflags.txt
@@ -505,6 +516,7 @@ else()
       etc/dictpch/allLinkDefs.h
     COMMAND
       ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/cmake/unix/makepchinput.py
+      ${__pch_exclude_args}
       ${CMAKE_SOURCE_DIR} . ${pyroot_legacy} ${__cling_pch}
     COMMAND
       ${CMAKE_COMMAND} -E env ROOTIGNOREPREFIX=1 ${Python3_EXECUTABLE}

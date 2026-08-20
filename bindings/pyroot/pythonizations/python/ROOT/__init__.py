@@ -21,7 +21,6 @@ from importlib.machinery import ModuleSpec
 from importlib.metadata import PackageNotFoundError, version
 
 from . import _asan  # noqa: F401  # imported for side effects for setup specific to AddressSanitizer environments
-from . import _bootstrap
 from ._facade import ROOTFacade
 from ._python_version import _root_python_version
 
@@ -42,10 +41,6 @@ if _major_minor(_runtime_version) != _major_minor(_root_python_version):
     Python major.minor versions must match. Use a matching Python or ROOT build.
     """
     raise ImportError(textwrap.dedent(message))
-
-# Drop potentially stale modules.idx and reconcile ROOT.modulemap with the ROOT
-# distributions currently installed in site-packages
-_bootstrap.bootstrap()
 
 # Prevent cppyy's check for extra header directory
 os.environ["CPPYY_API_PATH"] = "none"
